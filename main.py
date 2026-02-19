@@ -65,6 +65,8 @@ def discover(all_hosts, my_ip):
                 print(f"discover error {ip}: {e}")
 
 def handle_received_packet(packet: str):
+    print("a")
+    packet = json.loads(packet)
     if packet["type"] == "ASK":
         reply = {
             "type": "REPLY",
