@@ -4,6 +4,14 @@ import json
 import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import platform
+
+def get_listen_cmd(port: int):
+    system = platform.system().lower()
+    if system == "darwin":
+        return ["nc", "-lk", str(port)]            # macOS/BSD nc
+    else:
+        return ["nc", "-l", "-k", "-p", str(port)] # your Debian variant
 
 known_users = {}
 
@@ -43,7 +51,7 @@ def send_ask(ip: str):
             input = raw + "\n",
             text = True,
             check = False,
-            timeout = 0.4,
+            timeout = 1.5,
             stdout = subprocess.DEVNULL,
             stderr = subprocess.DEVNULL
         )
@@ -79,10 +87,10 @@ def handle_received_packet(packet: str):
     elif packet["type"] == "REPLY":
         receiver_name = packet["RECEIVER_NAME"]
         receiver_ip = packet["RECEIVER_IP"]
-        if not known_users[receiver_ip]:
+        if receiver_ip not in known_users:
             known_users[receiver_ip] = receiver_name
             print(f'Discovered {receiver_name} @ {receiver_ip}')
-        elif not known_users[receiver_ip] == receiver_name:
+        elif known_users[receiver_ip] != receiver_name:
             print(f'Discovered {receiver_name} @ {receiver_ip}, [Address was previously used by {known_users[receiver_ip]}]')
             known_users[receiver_ip] = receiver_name
         else:
@@ -95,20 +103,23 @@ def handle_received_packet(packet: str):
 
 
 def listen_loop():
-    while not stop_event.is_set():
-        try:
-            p = subprocess.run(
-                ["nc", "-l", "-p", str(PORT)],
-                capture_output = True,
-                text = True,
-                timeout = 1.0,
-                check = False
-            )
-            raw = p.stdout.strip()
+    cmd = get_listen_cmd(PORT)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    try:
+        for raw in proc.stdout:
+            raw = raw.strip()
             if raw:
                 handle_received_packet(raw)
-        except subprocess.TimeoutExpired:
-            pass
+            if stop_event.is_set():
+                break
+    finally:
+        proc.terminate()
 
 def main():
     mock_packet = {
