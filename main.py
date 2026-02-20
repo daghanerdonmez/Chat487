@@ -108,22 +108,28 @@ def handle_received_packet(packet: str):
 
 def listen_loop():
     cmd = get_listen_cmd(PORT)
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        bufsize=1,
-    )
-    try:
-        for raw in proc.stdout:
-            raw = raw.strip()
-            if raw:
-                handle_received_packet(raw)
-            if stop_event.is_set():
-                break
-    finally:
-        proc.terminate()
+    while not stop_event.is_set():
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        try:
+            for raw in proc.stdout:
+                raw = raw.strip()
+                if raw:
+                    handle_received_packet(raw)
+                    break
+                if stop_event.is_set():
+                    break
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
 
 def main():
     mock_packet = {
