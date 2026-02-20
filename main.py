@@ -75,7 +75,10 @@ def discover(all_hosts, my_ip):
 
 def handle_received_packet(packet: str):
     print("a")
-    packet = json.loads(packet)
+    try:
+        packet = json.loads(packet)
+    except json.decoder.JSONDecodeError:
+        print("evet json error")
     if packet["type"] == "ASK":
         print("b")
         reply = {
