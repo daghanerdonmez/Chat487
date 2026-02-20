@@ -1,6 +1,7 @@
 import platform
 import subprocess
 import threading
+import json
 
 PORT = 12487
 stop_event = threading.Event()
@@ -16,22 +17,15 @@ def get_listen_cmd(port: int):
 def listen_loop():
     cmd = get_listen_cmd(PORT)
     print(f"listening with: {' '.join(cmd)}")
-
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        for raw in proc.stdout:
-            raw = raw.strip()
-            if raw:
-                print(f"received: {raw}")
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True) as proc:
+        for line in proc.stdout:
             if stop_event.is_set():
                 break
-    finally:
-        proc.terminate()
+            raw = line.strip()
+            print(raw)
+
+        if proc.poll() is None:
+            proc.terminate()
 
 
 def main():
