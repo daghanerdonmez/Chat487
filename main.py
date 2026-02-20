@@ -22,6 +22,7 @@ all_hosts = [str(ip) for ip in ipaddress.ip_network(cidr, strict=False).hosts()]
 PORT = 12487
 
 def send_packet(ip: str, packet: dict):
+    print("c")
     raw = json.dumps(packet)
     subprocess.run(
         ["nc", ip, str(PORT)],
@@ -46,7 +47,7 @@ def send_ask(ip: str):
             stdout = subprocess.DEVNULL,
             stderr = subprocess.DEVNULL
         )
-        print("oldu")
+        print(f"oldu @ {ip}")
     except subprocess.TimeoutExpired:
         pass
 
@@ -68,6 +69,7 @@ def handle_received_packet(packet: str):
     print("a")
     packet = json.loads(packet)
     if packet["type"] == "ASK":
+        print("b")
         reply = {
             "type": "REPLY",
             "RECEIVER_NAME": username,
@@ -86,6 +88,7 @@ def handle_received_packet(packet: str):
         else:
             pass
     elif packet["type"] == "MESSAGE":
+        print("d")
         print(f'{packet["SENDER_NAME"]}: {packet["PAYLOAD"]}')
     else:
         pass
@@ -129,6 +132,6 @@ def main():
         elif cmd == "discover":
             discover(all_hosts, my_ip)
         else:
-            print("unknown command")
+            send_packet("192.168.0.24", mock_packet)
 
 main()
