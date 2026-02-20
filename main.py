@@ -6,12 +6,14 @@ import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import platform
 
+NC = "/usr/bin/nc"
+
 def get_listen_cmd(port: int):
     system = platform.system().lower()
     if system == "darwin":
-        return ["nc", "-lk", str(port)]            # macOS/BSD nc
+        return [NC, "-lK", str(port)]            # macOS/BSD nc
     else:
-        return ["nc", "-l", "-k", "-p", str(port)] # your Debian variant
+        return [NC, "-l", "-k", "-p", str(port)] # your Debian variant
 
 known_users = {}
 
@@ -35,7 +37,7 @@ def send_packet(ip: str, packet: dict):
     print("c")
     raw = json.dumps(packet)
     subprocess.run(
-        ["nc", ip, str(PORT)],
+        [NC, ip, str(PORT)],
         input = raw + "\n",
         text = True,
         check = False
@@ -49,7 +51,7 @@ def send_ask(ip: str):
     raw = json.dumps(packet)
     try:
         subprocess.run(
-            ["nc", ip, str(PORT)],
+            [NC, ip, str(PORT)],
             input = raw + "\n",
             text = True,
             check = False,
