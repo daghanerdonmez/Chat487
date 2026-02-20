@@ -79,6 +79,7 @@ def handle_received_packet(packet: str):
         packet = json.loads(packet)
     except json.decoder.JSONDecodeError:
         print("evet json error")
+        return
     if packet["type"] == "ASK":
         print("b")
         reply = {
