@@ -16,29 +16,23 @@ def get_listen_cmd(port: int):
 def listen_loop():
     cmd = get_listen_cmd(PORT)
     print(f"listening with: {' '.join(cmd)}")
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
 
-    while not stop_event.is_set():
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-        )
-        try:
-            for raw in proc.stdout:
-                raw = raw.strip()
-                if raw:
-                    print(f"received: {raw}")
-                    break
-                if stop_event.is_set():
-                    break
-        finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=0.5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+    try:
+        for raw in proc.stdout:
+            raw = raw.strip()
+            if raw:
+                print(f"received: {raw}")
+            if stop_event.is_set():
+                break
+    finally:
+        proc.terminate()
 
 
 def main():

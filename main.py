@@ -55,7 +55,7 @@ def send_ask(ip: str):
             stdout = subprocess.DEVNULL,
             stderr = subprocess.DEVNULL
         )
-        print(f"oldu @ {ip}")
+        #print(f"oldu @ {ip}")
     except subprocess.TimeoutExpired:
         pass
 
