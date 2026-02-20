@@ -99,7 +99,7 @@ def handle_received_packet(packet: str):
         print("d")
         print(f'{packet["SENDER_NAME"]}: {packet["PAYLOAD"]}')
     else:
-        pass
+        print("handleelse")
 
 
 def listen_loop():
