@@ -113,8 +113,7 @@ def listen_loop():
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
+            text=True
         )
         try:
             for raw in proc.stdout:

@@ -10,7 +10,7 @@ stop_event = threading.Event()
 def get_listen_cmd(port: int):
     system = platform.system().lower()
     if system == "darwin":
-        return ["nc", "-lk", str(port)]
+        return ["nc", "-l", str(port)]
     return ["nc", "-l", "-k", "-p", str(port)]
 
 
