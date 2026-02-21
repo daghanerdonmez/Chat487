@@ -33,7 +33,7 @@ s.connect(("8.8.8.8", 80))
 my_ip = s.getsockname()[0]
 s.close()
 
-other_ip = "192.168.0.24" if my_ip == "192.168.0.30" else "192.168.0.30"
+other_ip = "192.168.0.24" if my_ip == "192.168.0.23" else "192.168.0.23"
 
 cidr = "192.168.0.0/24"
 all_hosts = [str(ip) for ip in ipaddress.ip_network(cidr, strict=False).hosts()]
@@ -62,7 +62,7 @@ def send_ask(ip: str):
             input = raw + "\n",
             text = True,
             check = False,
-            timeout = 0.4,
+            timeout = 1,
             stdout = subprocess.DEVNULL,
             stderr = subprocess.DEVNULL
         )
@@ -100,6 +100,7 @@ def handle_received_packet(packet: str):
         }
         send_packet(packet["SENDER_IP"], reply)
     elif packet["type"] == "REPLY":
+        print("f")
         receiver_name = packet["RECEIVER_NAME"]
         receiver_ip = packet["RECEIVER_IP"]
         if receiver_ip not in known_users:
