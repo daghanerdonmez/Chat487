@@ -120,27 +120,16 @@ def handle_received_packet(packet: str):
 
 def listen_loop():
     cmd = get_listen_cmd(PORT)
+
     while not stop_event.is_set():
-        proc = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        try:
-            for raw in proc.stdout:
-                raw = raw.strip()
-                if raw:
-                    handle_received_packet(raw)
-                    break
+        # On macOS this handles one connection, then process exits.
+        with subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True) as proc:
+            for line in proc.stdout:
                 if stop_event.is_set():
                     break
-        finally:
-            proc.terminate()
-            try:
-                proc.wait(timeout=0.5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+                raw = line.strip()
+                if raw:
+                    print(raw)
 
 def main():
     mock_packet = {
