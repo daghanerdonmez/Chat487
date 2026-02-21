@@ -87,6 +87,8 @@ def discover(all_hosts, my_ip):
             except Exception as e:
                 print(f"discover error {ip}: {e}")
 
+    print(known_users)
+
 def handle_received_packet(packet: str):
     print("a")
     try:
@@ -156,6 +158,9 @@ def stop_listener_proc():
 
 def main():
     try:
+
+        state = 0
+
         mock_packet = {
             "type": "MESSAGE",
             "PAYLOAD": "Merhaba!",
@@ -169,6 +174,8 @@ def main():
         t.start()
 
         while True:
+
+
             cmd = input("> ").strip()
             if cmd == "quit":
                 break
