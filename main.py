@@ -11,9 +11,16 @@ NC = "/usr/bin/nc"
 def get_listen_cmd(port: int):
     system = platform.system().lower()
     if system == "darwin":
-        return [NC, "-lK", str(port)]            # macOS/BSD nc
+        return [NC, "-lk", str(port)]            # macOS/BSD nc
     else:
         return [NC, "-l", "-k", "-p", str(port)] # your Debian variant
+    
+def get_send_cmd(ip:int, port: int):
+    system = platform.system().lower()
+    if system == "darwin":
+        return [NC, "-N", "0", str(ip), str(port)]
+    else:
+        return [NC, "-N", str(ip), str(port)]
 
 known_users = {}
 
@@ -37,7 +44,7 @@ def send_packet(ip: str, packet: dict):
     print("c")
     raw = json.dumps(packet)
     subprocess.run(
-        [NC, ip, str(PORT)],
+        get_send_cmd(ip, PORT),
         input = raw + "\n",
         text = True,
         check = False
@@ -51,11 +58,11 @@ def send_ask(ip: str):
     raw = json.dumps(packet)
     try:
         subprocess.run(
-            [NC, ip, str(PORT)],
+            get_send_cmd(ip, PORT),
             input = raw + "\n",
             text = True,
             check = False,
-            timeout = 1.5,
+            timeout = 0.4,
             stdout = subprocess.DEVNULL,
             stderr = subprocess.DEVNULL
         )
