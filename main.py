@@ -33,7 +33,7 @@ s.connect(("8.8.8.8", 80))
 my_ip = s.getsockname()[0]
 s.close()
 
-other_ip = "192.168.0.24" if my_ip == "192.168.0.23" else "192.168.0.23"
+other_ip = "192.168.0.24" if my_ip == "192.168.0.30" else "192.168.0.30"
 
 cidr = "192.168.0.0/24"
 all_hosts = [str(ip) for ip in ipaddress.ip_network(cidr, strict=False).hosts()]
