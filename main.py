@@ -130,6 +130,7 @@ def listen_loop():
                 raw = line.strip()
                 if raw:
                     print(raw)
+                    handle_received_packet(raw)
 
 def main():
     mock_packet = {
