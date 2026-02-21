@@ -40,6 +40,9 @@ all_hosts = [str(ip) for ip in ipaddress.ip_network(cidr, strict=False).hosts()]
 
 PORT = 12487
 
+listener_proc = None
+listener_lock = threading.Lock()
+
 def send_packet(ip: str, packet: dict):
     print("c")
     raw = json.dumps(packet)
@@ -119,11 +122,15 @@ def handle_received_packet(packet: str):
 
 
 def listen_loop():
+    global listener_proc
     cmd = get_listen_cmd(PORT)
 
     while not stop_event.is_set():
         # On macOS this handles one connection, then process exits.
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True) as proc:
+            with listener_lock:
+                listener_proc = proc
+
             for line in proc.stdout:
                 if stop_event.is_set():
                     break
@@ -132,28 +139,49 @@ def listen_loop():
                     print(raw)
                     handle_received_packet(raw)
 
+            with listener_lock:
+                if listener_proc is proc:
+                    listener_proc = None
+
+def stop_listener_proc():
+    with listener_lock:
+        proc = listener_proc
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 def main():
-    mock_packet = {
-        "type": "MESSAGE",
-        "PAYLOAD": "Merhaba!",
-        "SENDER_NAME": username,
-        "SENDER_IP": my_ip
-    }
-    #send_packet("192.168.0.24", mock_packet)
-    #discover()
+    try:
+        mock_packet = {
+            "type": "MESSAGE",
+            "PAYLOAD": "Merhaba!",
+            "SENDER_NAME": username,
+            "SENDER_IP": my_ip
+        }
+        #send_packet("192.168.0.24", mock_packet)
+        #discover()
 
-    t = threading.Thread(target=listen_loop, daemon=True)
-    t.start()
+        t = threading.Thread(target=listen_loop, daemon=True)
+        t.start()
 
-    while True:
-        cmd = input("> ").strip()
-        if cmd == "quit":
-            stop_event.set()
-            t.join(timeout=2)
-            break
-        elif cmd == "discover":
-            discover(all_hosts, my_ip)
-        else:
-            send_packet(other_ip, mock_packet)
+        while True:
+            cmd = input("> ").strip()
+            if cmd == "quit":
+                break
+            elif cmd == "discover":
+                discover(all_hosts, my_ip)
+            else:
+                send_packet(other_ip, mock_packet)
+        
+    except KeyboardInterrupt:
+        pass
+    finally:
+        stop_event.set()
+        stop_listener_proc()
+        t.join(timeout=2)
 
 main()
