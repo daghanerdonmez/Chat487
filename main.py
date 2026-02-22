@@ -1,3 +1,10 @@
+#CONFIGURATION
+
+NC = "/usr/bin/nc"
+PORT = 12487
+
+#CONFIGURATION
+
 import subprocess
 import threading
 import json
@@ -5,9 +12,6 @@ import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import platform
-
-NC = "/usr/bin/nc"
-PORT = 12487
 
 username = ""
 ip_chatting = None
@@ -53,7 +57,13 @@ def message_packet(message: str):
         }
 
 def send_packet(ip: str, packet: dict):
-    #print("c")
+    if packet.get("type") == "MESSAGE":
+        payload = str(packet.get("PAYLOAD", ""))
+        payload_size = len(payload.encode("utf-8"))
+        if payload_size > 2048:
+            print(f"Message too large ({payload_size} bytes). Max allowed is 2048 bytes.")
+            return False
+
     raw = json.dumps(packet)
     subprocess.run(
         get_send_cmd(ip, PORT),
@@ -61,6 +71,7 @@ def send_packet(ip: str, packet: dict):
         text = True,
         check = False
     )
+    return True
 
 def send_ask(ip: str):
     packet = {
@@ -254,8 +265,9 @@ def main():
                 elif cmd == "\menu":
                     state = 0
                 else:
-                    send_packet(ip_chatting, message_packet(cmd))
-                    known_users_chats.setdefault(ip_chatting, []).append((username, cmd))
+                    sent = send_packet(ip_chatting, message_packet(cmd))
+                    if sent:
+                        known_users_chats.setdefault(ip_chatting, []).append((username, cmd))
 
     except KeyboardInterrupt:
         pass
