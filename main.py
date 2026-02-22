@@ -1,7 +1,7 @@
 #CONFIGURATION
 
-NC = "/usr/bin/nc"
-PORT = 12487
+NC = "/usr/bin/nc" # Change this variable to the path of your desired Netcat version.
+PORT = 12487 # Change this variable to change the port to be used for communication.
 
 #CONFIGURATION
 
@@ -37,9 +37,9 @@ listener_lock = threading.Lock()
 def get_listen_cmd(port: int):
     system = platform.system().lower()
     if system == "darwin":
-        return [NC, "-lk", str(port)]            # macOS/BSD nc
+        return [NC, "-lk", str(port)]        
     else:
-        return [NC, "-l", "-k", "-p", str(port)] # your Debian variant
+        return [NC, "-l", "-k", "-p", str(port)] 
     
 def get_send_cmd(ip:int, port: int):
     system = platform.system().lower()
@@ -96,14 +96,13 @@ def send_ask(ip: str):
 def discover(all_hosts, my_ip):
     targets = [ip for ip in all_hosts if ip != my_ip]
 
-    # tune workers: too high can overload machine/network
     with ThreadPoolExecutor(max_workers=64) as ex:
         futures = {ex.submit(send_ask, ip): ip for ip in targets}
 
         for f in as_completed(futures):
             ip = futures[f]
             try:
-                f.result()   # raises if send_ask crashed
+                f.result()
             except Exception as e:
                 print(f"discover error {ip}: {e}")
 
@@ -159,7 +158,6 @@ def listen_loop():
     cmd = get_listen_cmd(PORT)
 
     while not stop_event.is_set():
-        # On macOS this handles one connection, then process exits.
         with subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True) as proc:
             with listener_lock:
                 listener_proc = proc
@@ -187,7 +185,7 @@ def stop_listener_proc():
             proc.kill()
 
 def clear_window():
-    print("\x1b[2J\x1b[H", end="")  # clear + home
+    print("\x1b[2J\x1b[H", end="")
 
 def render_menu():
     print("487 Chat App")
