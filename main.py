@@ -24,10 +24,8 @@ s.connect(("8.8.8.8", 80))
 my_ip = s.getsockname()[0]
 s.close()
 
-other_ip = "192.168.0.24" if my_ip == "192.168.0.30" else "192.168.0.30"
-
-cidr = "192.168.0.0/24"
-all_hosts = [str(ip) for ip in ipaddress.ip_network(cidr, strict=False).hosts()]
+local_network = ipaddress.ip_network(f"{my_ip}/24", strict=False)
+all_hosts = [str(ip) for ip in local_network.hosts()]
 
 listener_proc = None
 listener_lock = threading.Lock()
@@ -212,6 +210,8 @@ def main():
     global state
 
     try:
+        clear_window()
+        
         while not username:
             username = input("Enter username: ").strip()
             if not username:
@@ -223,8 +223,6 @@ def main():
 
         t = threading.Thread(target=listen_loop, daemon=True)
         t.start()
-
-        clear_window()
 
         while True:
             if state == 0:
