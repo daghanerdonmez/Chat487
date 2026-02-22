@@ -101,14 +101,14 @@ def discover(all_hosts, my_ip):
     print(known_users)
 
 def handle_received_packet(packet: str):
-    print("a")
+    #print("a")
     try:
         packet = json.loads(packet)
     except json.decoder.JSONDecodeError:
-        print("evet json error")
+        #print("evet json error")
         return
     if packet["type"] == "ASK":
-        print("b")
+        #print("b")
         reply = {
             "type": "REPLY",
             "RECEIVER_NAME": username,
@@ -116,7 +116,7 @@ def handle_received_packet(packet: str):
         }
         send_packet(packet["SENDER_IP"], reply)
     elif packet["type"] == "REPLY":
-        print("f")
+        #print("f")
         receiver_name = packet["RECEIVER_NAME"]
         receiver_ip = packet["RECEIVER_IP"]
         if receiver_ip not in known_users:
@@ -130,14 +130,15 @@ def handle_received_packet(packet: str):
         else:
             pass
     elif packet["type"] == "MESSAGE":
-        print("d")
+        #print("d")
         sender_ip = packet["SENDER_IP"]
         sender_name = packet["SENDER_NAME"]
         payload = packet["PAYLOAD"]
         known_users_chats.setdefault(sender_ip, []).append((sender_name, payload))
         print(f'{sender_name}: {payload}')
     else:
-        print("handleelse")
+        pass
+        #print("handleelse")
 
 
 def listen_loop():
@@ -155,7 +156,7 @@ def listen_loop():
                     break
                 raw = line.strip()
                 if raw:
-                    print(raw)
+                    #print(raw)
                     handle_received_packet(raw)
 
             with listener_lock:
@@ -177,7 +178,8 @@ def clear_window():
 
 def render_menu():
     print("487 Chat App")
-    print("Write 'discover' to discover new users around you.")
+    print("Write '\quit' to quit")
+    print("Write '\discover' to discover new users around you.")
     print("Write the name of a user to chat with them.")
     print(menuextra)
     print()
@@ -186,6 +188,7 @@ def render_menu():
 
 def render_chat():
     print("Chatting with", chatting_name)
+    print("Type '\menu' to return to menu or '\quit' to quit.")
     print()
     if ip_chatting is None:
         return
@@ -223,9 +226,9 @@ def main():
             cmd = input("> ").strip()
             menuextra = ""
             if state == 0:
-                if cmd == "quit":
+                if cmd == "\quit":
                     break
-                elif cmd == "discover":
+                elif cmd == "\discover":
                     discover(all_hosts, my_ip)
                 else:
                     ip_chatting = find_ip(known_users, cmd)
