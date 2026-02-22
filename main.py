@@ -7,6 +7,30 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import platform
 
 NC = "/usr/bin/nc"
+PORT = 12487
+
+username = "daghan"
+ip_chatting = None
+chatting_name = None
+menuextra = ""
+
+known_users = {}
+known_users_chats = {}
+
+stop_event = threading.Event()
+
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.connect(("8.8.8.8", 80))
+my_ip = s.getsockname()[0]
+s.close()
+
+other_ip = "192.168.0.24" if my_ip == "192.168.0.30" else "192.168.0.30"
+
+cidr = "192.168.0.0/24"
+all_hosts = [str(ip) for ip in ipaddress.ip_network(cidr, strict=False).hosts()]
+
+listener_proc = None
+listener_lock = threading.Lock()
 
 def get_listen_cmd(port: int):
     system = platform.system().lower()
@@ -21,27 +45,14 @@ def get_send_cmd(ip:int, port: int):
         return [NC, "-N", "0", str(ip), str(port)]
     else:
         return [NC, "-N", str(ip), str(port)]
-
-known_users = {}
-
-username = "daghan"
-
-stop_event = threading.Event()
-
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.connect(("8.8.8.8", 80))
-my_ip = s.getsockname()[0]
-s.close()
-
-other_ip = "192.168.0.24" if my_ip == "192.168.0.30" else "192.168.0.30"
-
-cidr = "192.168.0.0/24"
-all_hosts = [str(ip) for ip in ipaddress.ip_network(cidr, strict=False).hosts()]
-
-PORT = 12487
-
-listener_proc = None
-listener_lock = threading.Lock()
+    
+def message_packet(message: str):
+    return {
+            "type": "MESSAGE",
+            "PAYLOAD": message,
+            "SENDER_NAME": username,
+            "SENDER_IP": my_ip
+        }
 
 def send_packet(ip: str, packet: dict):
     print("c")
@@ -110,15 +121,21 @@ def handle_received_packet(packet: str):
         receiver_ip = packet["RECEIVER_IP"]
         if receiver_ip not in known_users:
             known_users[receiver_ip] = receiver_name
+            known_users_chats.setdefault(receiver_ip, [])
             print(f'Discovered {receiver_name} @ {receiver_ip}')
         elif known_users[receiver_ip] != receiver_name:
             print(f'Discovered {receiver_name} @ {receiver_ip}, [Address was previously used by {known_users[receiver_ip]}]')
             known_users[receiver_ip] = receiver_name
+            known_users_chats.setdefault(receiver_ip, [])
         else:
             pass
     elif packet["type"] == "MESSAGE":
         print("d")
-        print(f'{packet["SENDER_NAME"]}: {packet["PAYLOAD"]}')
+        sender_ip = packet["SENDER_IP"]
+        sender_name = packet["SENDER_NAME"]
+        payload = packet["PAYLOAD"]
+        known_users_chats.setdefault(sender_ip, []).append((sender_name, payload))
+        print(f'{sender_name}: {payload}')
     else:
         print("handleelse")
 
@@ -155,35 +172,79 @@ def stop_listener_proc():
         except subprocess.TimeoutExpired:
             proc.kill()
 
+def clear_window():
+    print("\x1b[2J\x1b[H", end="")  # clear + home
+
+def render_menu():
+    print("487 Chat App")
+    print("Write 'discover' to discover new users around you.")
+    print("Write the name of a user to chat with them.")
+    print(menuextra)
+    print()
+    print("Users you already know:")
+    print(known_users)
+
+def render_chat():
+    print("Chatting with", chatting_name)
+    print()
+    if ip_chatting is None:
+        return
+
+    for sender_name, message in known_users_chats.get(ip_chatting, []):
+        print(f"{sender_name}: {message}")
+
+
+def find_ip(users, username):
+    return next((ip for ip, user in users.items() if user == username), None)
 
 def main():
+    global chatting_name
+    global ip_chatting
+    global menuextra
+
     try:
-
         state = 0
-
-        mock_packet = {
-            "type": "MESSAGE",
-            "PAYLOAD": "Merhaba!",
-            "SENDER_NAME": username,
-            "SENDER_IP": my_ip
-        }
         #send_packet("192.168.0.24", mock_packet)
         #discover()
 
         t = threading.Thread(target=listen_loop, daemon=True)
         t.start()
 
-        while True:
+        clear_window()
 
+        while True:
+            if state == 0:
+                clear_window()
+                render_menu()
+            elif state == 1:
+                clear_window()
+                render_chat()
 
             cmd = input("> ").strip()
-            if cmd == "quit":
-                break
-            elif cmd == "discover":
-                discover(all_hosts, my_ip)
-            else:
-                send_packet(other_ip, mock_packet)
-        
+            menuextra = ""
+            if state == 0:
+                if cmd == "quit":
+                    break
+                elif cmd == "discover":
+                    discover(all_hosts, my_ip)
+                else:
+                    ip_chatting = find_ip(known_users, cmd)
+                    if ip_chatting is not None:
+                        state = 1
+                        chatting_name = cmd
+                        known_users_chats.setdefault(ip_chatting, [])
+                    else:
+                        menuextra = "No user with name " + cmd
+                    #send_packet(other_ip, mock_packet)
+            elif state == 1:
+                if cmd == "\quit":
+                    break
+                elif cmd == "\menu":
+                    state = 0
+                else:
+                    send_packet(ip_chatting, message_packet(cmd))
+                    known_users_chats.setdefault(ip_chatting, []).append((username, cmd))
+
     except KeyboardInterrupt:
         pass
     finally:
