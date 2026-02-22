@@ -9,7 +9,7 @@ import platform
 NC = "/usr/bin/nc"
 PORT = 12487
 
-username = "daghan"
+username = ""
 ip_chatting = None
 chatting_name = None
 menuextra = ""
@@ -55,7 +55,7 @@ def message_packet(message: str):
         }
 
 def send_packet(ip: str, packet: dict):
-    print("c")
+    #print("c")
     raw = json.dumps(packet)
     subprocess.run(
         get_send_cmd(ip, PORT),
@@ -135,7 +135,11 @@ def handle_received_packet(packet: str):
         sender_name = packet["SENDER_NAME"]
         payload = packet["PAYLOAD"]
         known_users_chats.setdefault(sender_ip, []).append((sender_name, payload))
-        print(f'{sender_name}: {payload}')
+        #print(f'{sender_name}: {payload}')
+        if state == 1:
+            clear_window()
+            render_chat()
+
     else:
         pass
         #print("handleelse")
@@ -201,11 +205,18 @@ def find_ip(users, username):
     return next((ip for ip, user in users.items() if user == username), None)
 
 def main():
+    global username
     global chatting_name
     global ip_chatting
     global menuextra
+    global state
 
     try:
+        while not username:
+            username = input("Enter username: ").strip()
+            if not username:
+                print("Username cannot be empty.")
+
         state = 0
         #send_packet("192.168.0.24", mock_packet)
         #discover()
