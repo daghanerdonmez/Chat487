@@ -135,7 +135,7 @@ def listen_loop():
 
         while not stop_event.is_set():
             try:
-                conn, _ = server_sock.accept()
+                conn, addr = server_sock.accept()
             except socket.timeout:
                 continue
             except OSError:
