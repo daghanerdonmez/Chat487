@@ -1,17 +1,14 @@
 #CONFIGURATION
 
-NC = "/usr/bin/nc" # Change this variable to the path of your desired Netcat version.
 PORT = 12487 # Change this variable to change the port to be used for communication.
 
 #CONFIGURATION
 
-import subprocess
 import threading
 import json
 import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import platform
 
 username = ""
 ip_chatting = None
@@ -31,22 +28,8 @@ s.close()
 local_network = ipaddress.ip_network(f"{my_ip}/24", strict=False)
 all_hosts = [str(ip) for ip in local_network.hosts()]
 
-listener_proc = None
+listener_sock = None
 listener_lock = threading.Lock()
-
-def get_listen_cmd(port: int):
-    system = platform.system().lower()
-    if system == "darwin":
-        return [NC, "-lk", str(port)]        
-    else:
-        return [NC, "-l", "-k", "-p", str(port)] 
-    
-def get_send_cmd(ip:int, port: int):
-    system = platform.system().lower()
-    if system == "darwin":
-        return [NC, "-N", "0", str(ip), str(port)]
-    else:
-        return [NC, "-N", str(ip), str(port)]
     
 def message_packet(message: str):
     return {
@@ -65,33 +48,19 @@ def send_packet(ip: str, packet: dict):
             return False
 
     raw = json.dumps(packet)
-    subprocess.run(
-        get_send_cmd(ip, PORT),
-        input = raw + "\n",
-        text = True,
-        check = False
-    )
-    return True
+    try:
+        with socket.create_connection((ip, PORT), timeout=1.0) as s:
+            s.sendall((raw + "\n").encode("utf-8"))
+        return True
+    except OSError:
+        return False
 
 def send_ask(ip: str):
     packet = {
         "type": "ASK",
         "SENDER_IP": my_ip
     }
-    raw = json.dumps(packet)
-    try:
-        subprocess.run(
-            get_send_cmd(ip, PORT),
-            input = raw + "\n",
-            text = True,
-            check = False,
-            timeout = 1,
-            stdout = subprocess.DEVNULL,
-            stderr = subprocess.DEVNULL
-        )
-        #print(f"oldu @ {ip}")
-    except subprocess.TimeoutExpired:
-        pass
+    send_packet(ip, packet)
 
 def discover(all_hosts, my_ip):
     targets = [ip for ip in all_hosts if ip != my_ip]
@@ -154,35 +123,50 @@ def handle_received_packet(packet: str):
 
 
 def listen_loop():
-    global listener_proc
-    cmd = get_listen_cmd(PORT)
+    global listener_sock
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
+        server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_sock.bind(("", PORT))
+        server_sock.listen()
+        server_sock.settimeout(1.0)
 
-    while not stop_event.is_set():
-        with subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True) as proc:
-            with listener_lock:
-                listener_proc = proc
+        with listener_lock:
+            listener_sock = server_sock
 
-            for line in proc.stdout:
-                if stop_event.is_set():
-                    break
-                raw = line.strip()
+        while not stop_event.is_set():
+            try:
+                conn, _ = server_sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+
+            with conn:
+                chunks = []
+                while True:
+                    data = conn.recv(4096)
+                    if not data:
+                        break
+                    chunks.append(data)
+                    if b"\n" in data:
+                        break
+
+                raw = b"".join(chunks).decode("utf-8", errors="replace").strip()
                 if raw:
-                    #print(raw)
                     handle_received_packet(raw)
 
-            with listener_lock:
-                if listener_proc is proc:
-                    listener_proc = None
+        with listener_lock:
+            if listener_sock is server_sock:
+                listener_sock = None
 
-def stop_listener_proc():
+def stop_listener_socket():
     with listener_lock:
-        proc = listener_proc
-    if proc and proc.poll() is None:
-        proc.terminate()
+        sock = listener_sock
+    if sock:
         try:
-            proc.wait(timeout=0.5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+            sock.close()
+        except OSError:
+            pass
 
 def clear_window():
     print("\x1b[2J\x1b[H", end="")
@@ -218,6 +202,7 @@ def main():
     global menuextra
     global state
 
+    t = None
     try:
         clear_window()
         
@@ -271,7 +256,8 @@ def main():
         pass
     finally:
         stop_event.set()
-        stop_listener_proc()
-        t.join(timeout=2)
+        stop_listener_socket()
+        if t is not None:
+            t.join(timeout=2)
 
 main()
