@@ -1,6 +1,6 @@
 #CONFIGURATION
 
-PORT = 12487 # Change this variable to change the port to be used for communication.
+PORT = 12345 # Change this variable to change the port to be used for communication.
 
 #CONFIGURATION
 

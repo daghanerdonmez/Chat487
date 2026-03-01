@@ -6,9 +6,7 @@ How to Run:
 
 Before Running:
 
-- Make sure Netcat exists at '/usr/bin/nc'.
-- If you want to use Netcat at a different location, change 'NC' variable at the top of main.py
-- Default port for communication is 12487, you can change 'PORT' variable at the top of main.py
+- Default port for communication is 12345, you can change 'PORT' variable at the top of main.py
 - This app uses only built in Python libraries so there is no requirements.txt included.
 
 Usage
