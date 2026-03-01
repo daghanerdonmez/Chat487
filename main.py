@@ -236,7 +236,7 @@ def main():
                     break
                 elif cmd == "\discover":
                     all_hosts = find_all_hosts()
-                    print(all_hosts)
+                    #print(all_hosts)
                     discover(all_hosts, my_ip)
                 else:
                     ip_chatting = find_ip(known_users, cmd)
