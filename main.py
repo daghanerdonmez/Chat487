@@ -9,6 +9,7 @@ import json
 import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import nmap
 
 username = ""
 ip_chatting = None
@@ -25,11 +26,13 @@ s.connect(("8.8.8.8", 80))
 my_ip = s.getsockname()[0]
 s.close()
 
-local_network = ipaddress.ip_network(f"{my_ip}/24", strict=False)
-all_hosts = [str(ip) for ip in local_network.hosts()]
-
 listener_sock = None
 listener_lock = threading.Lock()
+
+def find_all_hosts():
+    nm = nmap.PortScanner()
+    nm.scan(hosts=f"{my_ip}/24", arguments="-sn")
+    return nm.all_hosts()
     
 def message_packet(message: str):
     return {
@@ -232,6 +235,8 @@ def main():
                 if cmd == "\quit":
                     break
                 elif cmd == "\discover":
+                    all_hosts = find_all_hosts()
+                    print(all_hosts)
                     discover(all_hosts, my_ip)
                 else:
                     ip_chatting = find_ip(known_users, cmd)
