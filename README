@@ -1,13 +1,28 @@
 487 Chat App
 
+Warning
+
+- Discovery uses nmap.
+- On macOS, nmap host discovery may require sudo to work reliably.
+- I recommend running on Linux if possible.
+
 How to Run:
 
-- On your terminal run: python3 main.py
+- In terminal:
+
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python3 main.py
+
+- On macOS, if discovery does not find users, run instead:
+
+sudo python3 main.py
 
 Before Running:
 
+- Make sure nmap is installed on your system, as python-nmap package uses the nmap in your system. If it is not installed you can install it by "sudo brew install nmap" on MacOS and "sudo apt install nmap" on Linux distributions.
 - Default port for communication is 12345, you can change 'PORT' variable at the top of main.py
-- This app uses only built in Python libraries so there is no requirements.txt included.
 
 Usage
 
