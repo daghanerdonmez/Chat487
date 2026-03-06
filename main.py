@@ -152,7 +152,7 @@ def handle_received_packet(packet: str):
         receiver_name = packet["RECEIVER_NAME"]
         receiver_ip = packet["RECEIVER_IP"]
         if receiver_ip == my_ip:
-            pass
+            return
         if receiver_ip not in known_users:
             known_users[receiver_ip] = receiver_name
             known_users_chats.setdefault(receiver_ip, [])
