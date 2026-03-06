@@ -1,6 +1,7 @@
 #CONFIGURATION
 
-PORT = 12345 # Change this variable to change the port to be used for communication.
+PORT = 12487 # Change this variable to change the port to be used for communication.
+UDP_PORT = 5566
 
 #CONFIGURATION
 
@@ -28,6 +29,9 @@ s.close()
 
 listener_sock = None
 listener_lock = threading.Lock()
+
+udp_listener_sock = None
+udp_listener_lock = threading.Lock()
 
 def find_all_hosts():
     nm = nmap.PortScanner()
@@ -64,6 +68,62 @@ def send_ask(ip: str):
         "SENDER_IP": my_ip
     }
     send_packet(ip, packet)
+
+def send_ask_broadcast():
+    packet = {
+        "type": "ASK",
+        "SENDER_IP": my_ip
+    }
+    raw = json.dumps(packet).encode("utf-8")
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            sock.bind(("", 0))  
+            sock.sendto(raw, ("<broadcast>", UDP_PORT)) 
+        return True
+    except OSError as e:
+        print(f"broadcast failed: {e}")
+        return False
+    
+
+import select
+import socket
+
+def udp_listen_loop():
+    global udp_listener_sock
+
+    port = UDP_PORT 
+    buffer_size = 1024
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("", port))
+    s.setblocking(0)
+
+    with udp_listener_lock:
+        udp_listener_sock = s
+
+    try:
+        while not stop_event.is_set():
+            result = select.select([s], [], [])  # timeout keeps loop stoppable
+            if not result[0]:
+                continue
+
+            msg = result[0][0].recv(buffer_size)
+            if not msg:
+                continue
+
+            raw = msg.decode("utf-8", errors="replace").strip()
+            if raw:
+                handle_received_packet(raw)
+    finally:
+        with udp_listener_lock:
+            if udp_listener_sock is s:
+                udp_listener_sock = None
+        s.close()
+
+
 
 def discover(all_hosts, my_ip):
     targets = [ip for ip in all_hosts if ip != my_ip]
@@ -171,6 +231,15 @@ def stop_listener_socket():
         except OSError:
             pass
 
+def stop_udp_listener_socket():
+    with udp_listener_lock:
+        sock = udp_listener_sock
+    if sock:
+        try:
+            sock.close()
+        except OSError:
+            pass
+
 def clear_window():
     print("\x1b[2J\x1b[H", end="")
 
@@ -205,7 +274,8 @@ def main():
     global menuextra
     global state
 
-    t = None
+    tcp_listen_thread = None
+    udp_listen_thread = None
     try:
         clear_window()
         
@@ -218,8 +288,11 @@ def main():
         #send_packet("192.168.0.24", mock_packet)
         #discover()
 
-        t = threading.Thread(target=listen_loop, daemon=True)
-        t.start()
+        tcp_listen_thread = threading.Thread(target=listen_loop, daemon=True)
+        tcp_listen_thread.start()
+
+        udp_listen_thread = threading.Thread(target=udp_listen_loop, daemon=True)
+        udp_listen_thread.start()
 
         while True:
             if state == 0:
@@ -235,9 +308,7 @@ def main():
                 if cmd == "\quit":
                     break
                 elif cmd == "\discover":
-                    all_hosts = find_all_hosts()
-                    #print(all_hosts)
-                    discover(all_hosts, my_ip)
+                    send_ask_broadcast()
                 else:
                     ip_chatting = find_ip(known_users, cmd)
                     if ip_chatting is not None:
@@ -262,7 +333,10 @@ def main():
     finally:
         stop_event.set()
         stop_listener_socket()
-        if t is not None:
-            t.join(timeout=2)
+        stop_udp_listener_socket()
+        if tcp_listen_thread is not None:
+            tcp_listen_thread.join(timeout=2)
+        if udp_listen_thread is not None:
+            udp_listen_thread.join(timeout=2)
 
 main()
