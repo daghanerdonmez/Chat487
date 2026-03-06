@@ -2,6 +2,7 @@
 
 PORT = 12487 # Change this variable to change the port to be used for communication.
 UDP_PORT = 5566
+DISCOVER_INTERVAL_SECONDS = 10
 
 #CONFIGURATION
 
@@ -91,6 +92,15 @@ def discover_worker():
             return
         send_ask_broadcast()
         time.sleep(0.2)
+
+def auto_discover_loop():
+    while not stop_event.is_set():
+        discover_worker()
+        # Wait in small steps so stop_event can terminate promptly.
+        for _ in range(DISCOVER_INTERVAL_SECONDS * 10):
+            if stop_event.is_set():
+                return
+            time.sleep(0.1)
 
 def start_discover_thread():
     global discover_thread
@@ -298,6 +308,7 @@ def main():
 
     tcp_listen_thread = None
     udp_listen_thread = None
+    auto_discover_thread = None
     try:
         clear_window()
         
@@ -315,6 +326,9 @@ def main():
 
         udp_listen_thread = threading.Thread(target=udp_listen_loop, daemon=True)
         udp_listen_thread.start()
+        
+        auto_discover_thread = threading.Thread(target=auto_discover_loop, daemon=True)
+        auto_discover_thread.start()
 
         while True:
             if state == 0:
@@ -362,5 +376,7 @@ def main():
             tcp_listen_thread.join(timeout=2)
         if udp_listen_thread is not None:
             udp_listen_thread.join(timeout=2)
+        if auto_discover_thread is not None:
+            auto_discover_thread.join(timeout=2)
 
 main()
