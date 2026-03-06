@@ -10,7 +10,6 @@ import json
 import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import nmap
 
 username = ""
 ip_chatting = None
