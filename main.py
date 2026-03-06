@@ -98,7 +98,7 @@ def udp_listen_loop():
 
     try:
         while not stop_event.is_set():
-            result = select.select([s], [], [])  # timeout keeps loop stoppable
+            result = select.select([s], [], [], 1.0)  # timeout keeps loop stoppable
             if not result[0]:
                 continue
 
