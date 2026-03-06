@@ -185,6 +185,12 @@ def handle_received_packet(packet: str):
             known_users_chats.setdefault(receiver_ip, [])
         else:
             pass
+
+        if state == 0:
+            clear_window()
+            render_menu()
+            print("> ", end="", flush=True)
+
     elif packet["type"] == "MESSAGE":
         #print("d")
         sender_ip = packet["SENDER_IP"]
