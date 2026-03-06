@@ -11,6 +11,7 @@ import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import select
+import time
 
 
 username = ""
@@ -33,6 +34,8 @@ listener_lock = threading.Lock()
 
 udp_listener_sock = None
 udp_listener_lock = threading.Lock()
+discover_thread = None
+discover_lock = threading.Lock()
     
 def message_packet(message: str):
     return {
@@ -81,6 +84,22 @@ def send_ask_broadcast():
     except OSError as e:
         print(f"broadcast failed: {e}")
         return False
+
+def discover_worker():
+    for _ in range(3):
+        if stop_event.is_set():
+            return
+        send_ask_broadcast()
+        time.sleep(0.2)
+
+def start_discover_thread():
+    global discover_thread
+    with discover_lock:
+        if discover_thread is not None and discover_thread.is_alive():
+            return False
+        discover_thread = threading.Thread(target=discover_worker, daemon=True)
+        discover_thread.start()
+        return True
     
 def udp_listen_loop():
     global udp_listener_sock
@@ -305,7 +324,9 @@ def main():
                 if cmd == "\quit":
                     break
                 elif cmd == "\discover":
-                    send_ask_broadcast()
+                    started = start_discover_thread()
+                    if not started:
+                        menuextra = "Discovery is already running."
                 else:
                     ip_chatting = find_ip(known_users, cmd)
                     if ip_chatting is not None:
