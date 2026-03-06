@@ -10,6 +10,8 @@ import json
 import ipaddress
 import socket
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import select
+
 
 username = ""
 ip_chatting = None
@@ -31,11 +33,6 @@ listener_lock = threading.Lock()
 
 udp_listener_sock = None
 udp_listener_lock = threading.Lock()
-
-def find_all_hosts():
-    nm = nmap.PortScanner()
-    nm.scan(hosts=f"{my_ip}/24", arguments="-sn")
-    return nm.all_hosts()
     
 def message_packet(message: str):
     return {
@@ -85,10 +82,6 @@ def send_ask_broadcast():
         print(f"broadcast failed: {e}")
         return False
     
-
-import select
-import socket
-
 def udp_listen_loop():
     global udp_listener_sock
 
@@ -158,6 +151,8 @@ def handle_received_packet(packet: str):
         #print("f")
         receiver_name = packet["RECEIVER_NAME"]
         receiver_ip = packet["RECEIVER_IP"]
+        if receiver_ip == my_ip:
+            pass
         if receiver_ip not in known_users:
             known_users[receiver_ip] = receiver_name
             known_users_chats.setdefault(receiver_ip, [])
