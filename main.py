@@ -140,6 +140,9 @@ def handle_received_packet(packet: str):
         #print("evet json error")
         return
     if packet["type"] == "ASK":
+        sender_ip = packet.get("SENDER_IP")
+        if sender_ip == my_ip:
+            return  # ignore our own broadcast ASK
         #print("b")
         reply = {
             "type": "REPLY",
