@@ -1,382 +1,351 @@
-#CONFIGURATION
-
-PORT = 12487 # Change this variable to change the port to be used for communication.
-UDP_PORT = 5566
-DISCOVER_INTERVAL_SECONDS = 10
-
-#CONFIGURATION
-
 import threading
 import json
-import ipaddress
 import socket
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import select
 import time
 
+# CONFIG
 
-username = ""
-ip_chatting = None
-chatting_name = None
-menuextra = ""
+TCP_PORT = 12487
+UDP_PORT = 12487
 
-known_users = {}
-known_users_chats = {}
+# CONFIG
 
-stop_event = threading.Event()
 
-s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.connect(("8.8.8.8", 80))
-my_ip = s.getsockname()[0]
-s.close()
+class Chat():
+    def __init__(self, username):
+        self.PORT = TCP_PORT # Change this variable to change the port to be used for communication.
+        self.UDP_PORT = UDP_PORT
+        self.DISCOVER_INTERVAL_SECONDS = 10
 
-listener_sock = None
-listener_lock = threading.Lock()
+        self.username = username
+        self.ip_chatting = None
+        self.chatting_name = None
+        self.menuextra = ""
 
-udp_listener_sock = None
-udp_listener_lock = threading.Lock()
-discover_thread = None
-discover_lock = threading.Lock()
-    
-def message_packet(message: str):
-    return {
-            "type": "MESSAGE",
-            "PAYLOAD": message,
-            "SENDER_NAME": username,
-            "SENDER_IP": my_ip
-        }
+        self.known_users = {}
+        self.known_users_chats = {}
 
-def send_packet(ip: str, packet: dict):
-    if packet.get("type") == "MESSAGE":
-        payload = str(packet.get("PAYLOAD", ""))
-        payload_size = len(payload.encode("utf-8"))
-        if payload_size > 2048:
-            print(f"Message too large ({payload_size} bytes). Max allowed is 2048 bytes.")
-            return False
+        self.stop_event = threading.Event()
 
-    raw = json.dumps(packet)
-    try:
-        with socket.create_connection((ip, PORT), timeout=1.0) as s:
-            s.sendall((raw + "\n").encode("utf-8"))
-        return True
-    except OSError:
-        return False
-
-def send_ask(ip: str):
-    packet = {
-        "type": "ASK",
-        "SENDER_IP": my_ip
-    }
-    send_packet(ip, packet)
-
-def send_ask_broadcast():
-    packet = {
-        "type": "ASK",
-        "SENDER_IP": my_ip
-    }
-    raw = json.dumps(packet).encode("utf-8")
-
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            sock.bind(("", 0))  
-            sock.sendto(raw, ("<broadcast>", UDP_PORT)) 
-        return True
-    except OSError as e:
-        print(f"broadcast failed: {e}")
-        return False
-
-def discover_worker():
-    for _ in range(3):
-        if stop_event.is_set():
-            return
-        send_ask_broadcast()
-        time.sleep(0.2)
-
-def auto_discover_loop():
-    while not stop_event.is_set():
-        discover_worker()
-        # Wait in small steps so stop_event can terminate promptly.
-        for _ in range(DISCOVER_INTERVAL_SECONDS * 10):
-            if stop_event.is_set():
-                return
-            time.sleep(0.1)
-
-def start_discover_thread():
-    global discover_thread
-    with discover_lock:
-        if discover_thread is not None and discover_thread.is_alive():
-            return False
-        discover_thread = threading.Thread(target=discover_worker, daemon=True)
-        discover_thread.start()
-        return True
-    
-def udp_listen_loop():
-    global udp_listener_sock
-
-    port = UDP_PORT 
-    buffer_size = 1024
-
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind(("", port))
-    s.setblocking(0)
-
-    with udp_listener_lock:
-        udp_listener_sock = s
-
-    try:
-        while not stop_event.is_set():
-            result = select.select([s], [], [], 1.0)  # timeout keeps loop stoppable
-            if not result[0]:
-                continue
-
-            msg = result[0][0].recv(buffer_size)
-            if not msg:
-                continue
-
-            raw = msg.decode("utf-8", errors="replace").strip()
-            if raw:
-                handle_received_packet(raw)
-    finally:
-        with udp_listener_lock:
-            if udp_listener_sock is s:
-                udp_listener_sock = None
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        self.my_ip = s.getsockname()[0]
         s.close()
 
+        self.listener_sock = None
+        self.listener_lock = threading.Lock()
 
+        self.udp_listener_sock = None
+        self.udp_listener_lock = threading.Lock()
+        self.discover_thread = None
+        self.discover_lock = threading.Lock()
 
-def discover(all_hosts, my_ip):
-    targets = [ip for ip in all_hosts if ip != my_ip]
+        self.state = 0
 
-    with ThreadPoolExecutor(max_workers=64) as ex:
-        futures = {ex.submit(send_ask, ip): ip for ip in targets}
+    def _message_packet(self, message: str):
+        return {
+                "type": "MESSAGE",
+                "PAYLOAD": message,
+                "SENDER_NAME": self.username,
+                "SENDER_IP": self.my_ip
+            }
+    
+    def _send_packet(self, ip: str, packet: dict):
+        if packet.get("type") == "MESSAGE":
+            payload = str(packet.get("PAYLOAD", ""))
+            payload_size = len(payload.encode("utf-8"))
+            if payload_size > 2048:
+                print(f"Message too large ({payload_size} bytes). Max allowed is 2048 bytes.")
+                return False
 
-        for f in as_completed(futures):
-            ip = futures[f]
-            try:
-                f.result()
-            except Exception as e:
-                print(f"discover error {ip}: {e}")
+        raw = json.dumps(packet)
+        try:
+            with socket.create_connection((ip, self.PORT), timeout=1.0) as s:
+                s.sendall((raw + "\n").encode("utf-8"))
+            return True
+        except OSError:
+            return False
 
-    print(known_users)
-
-def handle_received_packet(packet: str):
-    #print("a")
-    try:
-        packet = json.loads(packet)
-    except json.decoder.JSONDecodeError:
-        #print("evet json error")
-        return
-    if packet["type"] == "ASK":
-        sender_ip = packet.get("SENDER_IP")
-        if sender_ip == my_ip:
-            return  # ignore our own broadcast ASK
-        #print("b")
-        reply = {
-            "type": "REPLY",
-            "RECEIVER_NAME": username,
-            "RECEIVER_IP": my_ip
+    def _send_ask_broadcast(self):
+        packet = {
+            "type": "ASK",
+            "SENDER_IP": self.my_ip
         }
-        send_packet(packet["SENDER_IP"], reply)
-    elif packet["type"] == "REPLY":
-        #print("f")
-        receiver_name = packet["RECEIVER_NAME"]
-        receiver_ip = packet["RECEIVER_IP"]
-        if receiver_ip == my_ip:
+        raw = json.dumps(packet).encode("utf-8")
+
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                sock.bind(("", 0))  
+                sock.sendto(raw, ("<broadcast>", self.UDP_PORT)) 
+            return True
+        except OSError as e:
+            print(f"broadcast failed: {e}")
+            return False
+        
+    def _discover_worker(self):
+        for _ in range(3):
+            if self.stop_event.is_set():
+                return
+            self._send_ask_broadcast()
+            time.sleep(0.2)
+
+    def _auto_discover_loop(self):
+        while not self.stop_event.is_set():
+            self._discover_worker()
+            # Wait in small steps so stop_event can terminate promptly.
+            for _ in range(self.DISCOVER_INTERVAL_SECONDS * 10):
+                if self.stop_event.is_set():
+                    return
+                time.sleep(0.1)
+
+    def _start_discover_thread(self):
+        with self.discover_lock:
+            if self.discover_thread is not None and self.discover_thread.is_alive():
+                return False
+            self.discover_thread = threading.Thread(target=self._discover_worker, daemon=True)
+            self.discover_thread.start()
+            return True
+        
+    def _udp_listen_loop(self):
+        port = self.UDP_PORT 
+        buffer_size = 1024
+
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("", port))
+        s.setblocking(0)
+
+        with self.udp_listener_lock:
+            self.udp_listener_sock = s
+
+        try:
+            while not self.stop_event.is_set():
+                result = select.select([s], [], [], 1.0)  # timeout keeps loop stoppable
+                if not result[0]:
+                    continue
+
+                msg = result[0][0].recv(buffer_size)
+                if not msg:
+                    continue
+
+                raw = msg.decode("utf-8", errors="replace").strip()
+                if raw:
+                    self._handle_received_packet(raw)
+        finally:
+            with self.udp_listener_lock:
+                if self.udp_listener_sock is s:
+                    self.udp_listener_sock = None
+            s.close()
+
+    def _handle_received_packet(self, packet: str):
+        #print("a")
+        try:
+            packet = json.loads(packet)
+        except json.decoder.JSONDecodeError:
+            #print("evet json error")
             return
-        if receiver_ip not in known_users:
-            known_users[receiver_ip] = receiver_name
-            known_users_chats.setdefault(receiver_ip, [])
-            print(f'Discovered {receiver_name} @ {receiver_ip}')
-        elif known_users[receiver_ip] != receiver_name:
-            print(f'Discovered {receiver_name} @ {receiver_ip}, [Address was previously used by {known_users[receiver_ip]}]')
-            known_users[receiver_ip] = receiver_name
-            known_users_chats.setdefault(receiver_ip, [])
+        if packet["type"] == "ASK":
+            sender_ip = packet.get("SENDER_IP")
+            if sender_ip == self.my_ip:
+                return  # ignore our own broadcast ASK
+            #print("b")
+            reply = {
+                "type": "REPLY",
+                "RECEIVER_NAME": self.username,
+                "RECEIVER_IP": self.my_ip
+            }
+            self._send_packet(packet["SENDER_IP"], reply)
+        elif packet["type"] == "REPLY":
+            #print("f")
+            receiver_name = packet["RECEIVER_NAME"]
+            receiver_ip = packet["RECEIVER_IP"]
+            if receiver_ip == self.my_ip:
+                return
+            if receiver_ip not in self.known_users:
+                self.known_users[receiver_ip] = receiver_name
+                self.known_users_chats.setdefault(receiver_ip, [])
+                print(f'Discovered {receiver_name} @ {receiver_ip}')
+            elif self.known_users[receiver_ip] != receiver_name:
+                print(f'Discovered {receiver_name} @ {receiver_ip}, [Address was previously used by {self.known_users[receiver_ip]}]')
+                self.known_users[receiver_ip] = receiver_name
+                self.known_users_chats.setdefault(receiver_ip, [])
+            else:
+                pass
+
+            if self.state == 0:
+                self._clear_window()
+                self._render_menu()
+                print("> ", end="", flush=True)
+
+        elif packet["type"] == "MESSAGE":
+            #print("d")
+            sender_ip = packet["SENDER_IP"]
+            sender_name = packet["SENDER_NAME"]
+            payload = packet["PAYLOAD"]
+            self.known_users_chats.setdefault(sender_ip, []).append((sender_name, payload))
+            #print(f'{sender_name}: {payload}')
+            if self.state == 1:
+                self._clear_window()
+                self._render_chat()
+
         else:
             pass
-
-        if state == 0:
-            clear_window()
-            render_menu()
-            print("> ", end="", flush=True)
-
-    elif packet["type"] == "MESSAGE":
-        #print("d")
-        sender_ip = packet["SENDER_IP"]
-        sender_name = packet["SENDER_NAME"]
-        payload = packet["PAYLOAD"]
-        known_users_chats.setdefault(sender_ip, []).append((sender_name, payload))
-        #print(f'{sender_name}: {payload}')
-        if state == 1:
-            clear_window()
-            render_chat()
-
-    else:
-        pass
-        #print("handleelse")
+            #print("handleelse")
 
 
-def listen_loop():
-    global listener_sock
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
-        server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server_sock.bind(("", PORT))
-        server_sock.listen()
-        server_sock.settimeout(1.0)
+    def _tcp_listen_loop(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
+            server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server_sock.bind(("", self.PORT))
+            server_sock.listen()
+            server_sock.settimeout(1.0)
 
-        with listener_lock:
-            listener_sock = server_sock
+            with self.listener_lock:
+                self.listener_sock = server_sock
 
-        while not stop_event.is_set():
+            while not self.stop_event.is_set():
+                try:
+                    conn, addr = server_sock.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break
+
+                with conn:
+                    chunks = []
+                    while True:
+                        data = conn.recv(4096)
+                        if not data:
+                            break
+                        chunks.append(data)
+                        if b"\n" in data:
+                            break
+
+                    raw = b"".join(chunks).decode("utf-8", errors="replace").strip()
+                    if raw:
+                        self._handle_received_packet(raw)
+
+            with self.listener_lock:
+                if self.listener_sock is server_sock:
+                    self.listener_sock = None
+
+
+    def _stop_listener_socket(self):
+        with self.listener_lock:
+            sock = self.listener_sock
+        if sock:
             try:
-                conn, addr = server_sock.accept()
-            except socket.timeout:
-                continue
+                sock.close()
             except OSError:
-                break
+                pass
 
-            with conn:
-                chunks = []
-                while True:
-                    data = conn.recv(4096)
-                    if not data:
-                        break
-                    chunks.append(data)
-                    if b"\n" in data:
-                        break
+    def _stop_udp_listener_socket(self):
+        with self.udp_listener_lock:
+            sock = self.udp_listener_sock
+        if sock:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
-                raw = b"".join(chunks).decode("utf-8", errors="replace").strip()
-                if raw:
-                    handle_received_packet(raw)
+    def _clear_window(self):
+        print("\x1b[2J\x1b[H", end="")
 
-        with listener_lock:
-            if listener_sock is server_sock:
-                listener_sock = None
+    def _render_menu(self):
+        print("487 Chat App")
+        print("Write '\quit' to quit")
+        print("New users are discovered automatically every 10 seconds.")
+        print("Write '\discover' to manually discover new users around you.")
+        print("Write the name of a user to chat with them.")
+        print(self.menuextra)
+        print()
+        print("Users you already know:")
+        print(self.known_users)
 
-def stop_listener_socket():
-    with listener_lock:
-        sock = listener_sock
-    if sock:
+    def _render_chat(self):
+        print("Chatting with", self.chatting_name)
+        print("Type '\menu' to return to menu or '\quit' to quit.")
+        print()
+        if self.ip_chatting is None:
+            return
+
+        for sender_name, message in self.known_users_chats.get(self.ip_chatting, []):
+            print(f"{sender_name}: {message}")
+
+    def _find_ip(self, users, username):
+        return next((ip for ip, user in users.items() if user == username), None)
+
+    def run(self):
+        tcp_listen_thread = None
+        udp_listen_thread = None
+        auto_discover_thread = None
         try:
-            sock.close()
-        except OSError:
-            pass
+            self._clear_window()
+            self.state = 0
 
-def stop_udp_listener_socket():
-    with udp_listener_lock:
-        sock = udp_listener_sock
-    if sock:
-        try:
-            sock.close()
-        except OSError:
-            pass
+            tcp_listen_thread = threading.Thread(target=self._tcp_listen_loop, daemon=True)
+            tcp_listen_thread.start()
 
-def clear_window():
-    print("\x1b[2J\x1b[H", end="")
+            udp_listen_thread = threading.Thread(target=self._udp_listen_loop, daemon=True)
+            udp_listen_thread.start()
 
-def render_menu():
-    print("487 Chat App")
-    print("Write '\quit' to quit")
-    print("Write '\discover' to discover new users around you.")
-    print("Write the name of a user to chat with them.")
-    print(menuextra)
-    print()
-    print("Users you already know:")
-    print(known_users)
+            auto_discover_thread = threading.Thread(target=self._auto_discover_loop, daemon=True)
+            auto_discover_thread.start()
 
-def render_chat():
-    print("Chatting with", chatting_name)
-    print("Type '\menu' to return to menu or '\quit' to quit.")
-    print()
-    if ip_chatting is None:
-        return
+            while True:
+                if self.state == 0:
+                    self._clear_window()
+                    self._render_menu()
+                elif self.state == 1:
+                    self._clear_window()
+                    self._render_chat()
 
-    for sender_name, message in known_users_chats.get(ip_chatting, []):
-        print(f"{sender_name}: {message}")
+                cmd = input("> ").strip()
+                self.menuextra = ""
 
-
-def find_ip(users, username):
-    return next((ip for ip, user in users.items() if user == username), None)
-
-def main():
-    global username
-    global chatting_name
-    global ip_chatting
-    global menuextra
-    global state
-
-    tcp_listen_thread = None
-    udp_listen_thread = None
-    auto_discover_thread = None
-    try:
-        clear_window()
-        
-        while not username:
-            username = input("Enter username: ").strip()
-            if not username:
-                print("Username cannot be empty.")
-
-        state = 0
-        #send_packet("192.168.0.24", mock_packet)
-        #discover()
-
-        tcp_listen_thread = threading.Thread(target=listen_loop, daemon=True)
-        tcp_listen_thread.start()
-
-        udp_listen_thread = threading.Thread(target=udp_listen_loop, daemon=True)
-        udp_listen_thread.start()
-        
-        auto_discover_thread = threading.Thread(target=auto_discover_loop, daemon=True)
-        auto_discover_thread.start()
-
-        while True:
-            if state == 0:
-                clear_window()
-                render_menu()
-            elif state == 1:
-                clear_window()
-                render_chat()
-
-            cmd = input("> ").strip()
-            menuextra = ""
-            if state == 0:
-                if cmd == "\quit":
-                    break
-                elif cmd == "\discover":
-                    started = start_discover_thread()
-                    if not started:
-                        menuextra = "Discovery is already running."
-                else:
-                    ip_chatting = find_ip(known_users, cmd)
-                    if ip_chatting is not None:
-                        state = 1
-                        chatting_name = cmd
-                        known_users_chats.setdefault(ip_chatting, [])
+                if self.state == 0:
+                    if cmd == "\quit":
+                        break
+                    elif cmd == "\discover":
+                        started = self._start_discover_thread()
+                        if not started:
+                            self.menuextra = "Discovery is already running."
                     else:
-                        menuextra = "No user with name " + cmd
-                    #send_packet(other_ip, mock_packet)
-            elif state == 1:
-                if cmd == "\quit":
-                    break
-                elif cmd == "\menu":
-                    state = 0
+                        self.ip_chatting = self._find_ip(self.known_users, cmd)
+                        if self.ip_chatting is not None:
+                            self.state = 1
+                            self.chatting_name = cmd
+                            self.known_users_chats.setdefault(self.ip_chatting, [])
+                        else:
+                            self.menuextra = "No user with name " + cmd
                 else:
-                    sent = send_packet(ip_chatting, message_packet(cmd))
-                    if sent:
-                        known_users_chats.setdefault(ip_chatting, []).append((username, cmd))
+                    if cmd == "\quit":
+                        break
+                    elif cmd == "\menu":
+                        self.state = 0
+                    else:
+                        sent = self._send_packet(self.ip_chatting, self._message_packet(cmd))
+                        if sent:
+                            self.known_users_chats.setdefault(self.ip_chatting, []).append((self.username, cmd))
+        finally:
+            self.stop_event.set()
+            self._stop_listener_socket()
+            self._stop_udp_listener_socket()
+            if tcp_listen_thread is not None:
+                tcp_listen_thread.join(timeout=2)
+            if udp_listen_thread is not None:
+                udp_listen_thread.join(timeout=2)
+            if auto_discover_thread is not None:
+                auto_discover_thread.join(timeout=2)
 
-    except KeyboardInterrupt:
-        pass
-    finally:
-        stop_event.set()
-        stop_listener_socket()
-        stop_udp_listener_socket()
-        if tcp_listen_thread is not None:
-            tcp_listen_thread.join(timeout=2)
-        if udp_listen_thread is not None:
-            udp_listen_thread.join(timeout=2)
-        if auto_discover_thread is not None:
-            auto_discover_thread.join(timeout=2)
-
-main()
+if __name__ == "__main__":
+    print("\x1b[2J\x1b[H", end="")
+    username = ""
+    while not username:
+        username = input("Enter username: ").strip()
+        if not username:
+            print("Username cannot be empty.")
+    chatapp = Chat(username)
+    chatapp.run()
