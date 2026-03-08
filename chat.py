@@ -59,13 +59,6 @@ class Chat():
             return True
         except OSError:
             return False
-        
-    def _send_ask(self, ip: str):
-        packet = {
-            "type": "ASK",
-            "SENDER_IP": self.my_ip
-        }
-        self._send_packet(ip, packet)
 
     def _send_ask_broadcast(self):
         packet = {
@@ -255,8 +248,8 @@ class Chat():
 
     def _render_menu(self):
         print("487 Chat App")
-        print("Write '\\quit' to quit")
-        print("Write '\\discover' to discover new users around you.")
+        print("Write '\quit' to quit")
+        print("Write '\discover' to discover new users around you.")
         print("Write the name of a user to chat with them.")
         print(self.menuextra)
         print()
@@ -265,7 +258,7 @@ class Chat():
 
     def _render_chat(self):
         print("Chatting with", self.chatting_name)
-        print("Type '\\menu' to return to menu or '\\quit' to quit.")
+        print("Type '\menu' to return to menu or '\quit' to quit.")
         print()
         if self.ip_chatting is None:
             return
@@ -305,9 +298,9 @@ class Chat():
                 self.menuextra = ""
 
                 if self.state == 0:
-                    if cmd == "\\quit":
+                    if cmd == "\quit":
                         break
-                    elif cmd == "\\discover":
+                    elif cmd == "\discover":
                         started = self._start_discover_thread()
                         if not started:
                             self.menuextra = "Discovery is already running."
@@ -320,9 +313,9 @@ class Chat():
                         else:
                             self.menuextra = "No user with name " + cmd
                 else:
-                    if cmd == "\\quit":
+                    if cmd == "\quit":
                         break
-                    elif cmd == "\\menu":
+                    elif cmd == "\menu":
                         self.state = 0
                     else:
                         sent = self._send_packet(self.ip_chatting, self._message_packet(cmd))
