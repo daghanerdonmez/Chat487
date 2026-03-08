@@ -249,7 +249,8 @@ class Chat():
     def _render_menu(self):
         print("487 Chat App")
         print("Write '\quit' to quit")
-        print("Write '\discover' to discover new users around you.")
+        print("New users are discovered automatically every 10 seconds.")
+        print("Write '\discover' to manually discover new users around you.")
         print("Write the name of a user to chat with them.")
         print(self.menuextra)
         print()
