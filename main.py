@@ -530,11 +530,11 @@ class Chat():
                     elif cmd.split()[0] == "\sendfile":
                         parts = cmd.split(maxsplit=1)
                         if len(parts) < 2:
-                            print("Usage: \sendfile <filepath>")
+                            self._add_info_to_chat(self.ip_chatting, "Usage: \\sendfile <filepath>")
                         else:
                             path = parts[1]
                             if not os.path.isfile(path):
-                                print(f"File not found: {path}")
+                                self._add_info_to_chat(self.ip_chatting, f"File not found: {path}")
                             else:
                                 threading.Thread(
                                     target=self._send_file,
