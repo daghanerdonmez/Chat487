@@ -3,6 +3,10 @@ import json
 import socket
 import select
 import time
+import queue
+
+import base64
+import os
 
 # CONFIG
 
@@ -43,6 +47,21 @@ class Chat():
 
         self.state = 0
 
+        # --- File transfer: sender state ---
+        # Each active send is tracked by target IP (one file per user at a time)
+        self.send_states = {}       # {ip: {"acked": set, "rwnd": int, "send_times": dict, "next_seq": int}}
+        self.send_states_lock = threading.Lock()
+
+        # --- File transfer: receiver state ---
+        self.RECV_BUFFER_SIZE = 10  # parameterizable buffer size (in packets)
+        self.recv_buffers = {}      # {filename: {seq: body_bytes}}
+        self.recv_expected_seq = {} # {filename: next seq to write}
+        self.recv_files = {}        # {filename: open file handle}
+        self.recv_eof_seq = {}      # {filename: seq number of EOF packet}
+
+        # --- File transfer: incoming packet queue ---
+        self.file_queue = queue.Queue()
+
     def _message_packet(self, message: str):
         return {
                 "type": "MESSAGE",
@@ -50,7 +69,7 @@ class Chat():
                 "SENDER_NAME": self.username,
                 "SENDER_IP": self.my_ip
             }
-    
+
     def _send_packet(self, ip: str, packet: dict):
         if packet.get("type") == "MESSAGE":
             payload = str(packet.get("PAYLOAD", ""))
@@ -67,6 +86,12 @@ class Chat():
         except OSError:
             return False
 
+    def _send_udp_packet(self, ip, packet):
+        raw = json.dumps(packet).encode("utf-8")
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.sendto(raw, (ip, self.UDP_PORT))
+
+
     def _send_ask_broadcast(self):
         packet = {
             "type": "ASK",
@@ -77,13 +102,13 @@ class Chat():
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                sock.bind(("", 0))  
-                sock.sendto(raw, ("<broadcast>", self.UDP_PORT)) 
+                sock.bind(("", 0))
+                sock.sendto(raw, ("<broadcast>", self.UDP_PORT))
             return True
         except OSError as e:
             print(f"broadcast failed: {e}")
             return False
-        
+
     def _discover_worker(self):
         for _ in range(3):
             if self.stop_event.is_set():
@@ -107,10 +132,10 @@ class Chat():
             self.discover_thread = threading.Thread(target=self._discover_worker, daemon=True)
             self.discover_thread.start()
             return True
-        
+
     def _udp_listen_loop(self):
-        port = self.UDP_PORT 
-        buffer_size = 1024
+        port = self.UDP_PORT
+        buffer_size = 8192
 
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -126,31 +151,29 @@ class Chat():
                 if not result[0]:
                     continue
 
-                msg = result[0][0].recv(buffer_size)
+                msg, addr = result[0][0].recvfrom(buffer_size)
                 if not msg:
                     continue
 
+                sender_ip = addr[0]
                 raw = msg.decode("utf-8", errors="replace").strip()
                 if raw:
-                    self._handle_received_packet(raw)
+                    self._handle_received_packet(raw, sender_ip)
         finally:
             with self.udp_listener_lock:
                 if self.udp_listener_sock is s:
                     self.udp_listener_sock = None
             s.close()
 
-    def _handle_received_packet(self, packet: str):
-        #print("a")
+    def _handle_received_packet(self, packet: str, sender_ip: str = None):
         try:
             packet = json.loads(packet)
         except json.decoder.JSONDecodeError:
-            #print("evet json error")
             return
         if packet["type"] == "ASK":
-            sender_ip = packet.get("SENDER_IP")
-            if sender_ip == self.my_ip:
+            pkt_sender_ip = packet.get("SENDER_IP")
+            if pkt_sender_ip == self.my_ip:
                 return  # ignore our own broadcast ASK
-            #print("b")
             reply = {
                 "type": "REPLY",
                 "RECEIVER_NAME": self.username,
@@ -158,7 +181,6 @@ class Chat():
             }
             self._send_packet(packet["SENDER_IP"], reply)
         elif packet["type"] == "REPLY":
-            #print("f")
             receiver_name = packet["RECEIVER_NAME"]
             receiver_ip = packet["RECEIVER_IP"]
             if receiver_ip == self.my_ip:
@@ -180,20 +202,98 @@ class Chat():
                 print("> ", end="", flush=True)
 
         elif packet["type"] == "MESSAGE":
-            #print("d")
-            sender_ip = packet["SENDER_IP"]
+            pkt_sender_ip = packet["SENDER_IP"]
             sender_name = packet["SENDER_NAME"]
             payload = packet["PAYLOAD"]
-            self.known_users_chats.setdefault(sender_ip, []).append((sender_name, payload))
-            #print(f'{sender_name}: {payload}')
+            self.known_users_chats.setdefault(pkt_sender_ip, []).append((sender_name, payload))
             if self.state == 1:
                 self._clear_window()
                 self._render_chat()
 
+        elif packet["type"] == "File" or packet["type"] == "ACK":
+            # Put into queue for the file worker thread to handle
+            self.file_queue.put((packet, sender_ip))
+
         else:
             pass
-            #print("handleelse")
 
+    def _file_worker_loop(self):
+        """Single thread that processes all incoming File and ACK packets from the queue."""
+        while not self.stop_event.is_set():
+            try:
+                packet, sender_ip = self.file_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+
+            if packet["type"] == "File":
+                self._handle_file_packet(packet, sender_ip)
+            elif packet["type"] == "ACK":
+                self._handle_ack_packet(packet, sender_ip)
+
+    def _handle_file_packet(self, packet, sender_ip):
+        filename = packet["NAME"]
+        seq = packet["SEQ"]
+        eof = packet.get("EOF", False)
+        body = base64.b64decode(packet["BODY"])
+
+        # Initialize receive state for this file if first time seeing it
+        if filename not in self.recv_buffers:
+            self.recv_buffers[filename] = {}
+            self.recv_expected_seq[filename] = 1
+            os.makedirs("received", exist_ok=True)
+            self.recv_files[filename] = open(os.path.join("received", filename), "wb")
+            print(f"\nReceiving file: {filename}")
+
+        # Remember which SEQ is the last one
+        if eof:
+            self.recv_eof_seq[filename] = seq
+
+        # Store packet in buffer (handles out-of-order and duplicates)
+        self.recv_buffers[filename][seq] = body
+
+        # Write contiguous packets starting from expected_seq
+        while self.recv_expected_seq[filename] in self.recv_buffers[filename]:
+            expected = self.recv_expected_seq[filename]
+            self.recv_files[filename].write(self.recv_buffers[filename].pop(expected))
+            self.recv_expected_seq[filename] += 1
+
+        # Calculate RWND
+        rwnd = self.RECV_BUFFER_SIZE - len(self.recv_buffers[filename])
+        if rwnd < 0:
+            rwnd = 0
+
+        # Send ACK back (sender identifies transfer by our IP from UDP header)
+        ack = {
+            "type": "ACK",
+            "SEQ": seq,
+            "RWND": rwnd
+        }
+        self._send_udp_packet(sender_ip, ack)
+
+        # Check if transfer is complete
+        if filename in self.recv_eof_seq:
+            if self.recv_expected_seq[filename] > self.recv_eof_seq[filename]:
+                self.recv_files[filename].close()
+                del self.recv_files[filename]
+                del self.recv_buffers[filename]
+                del self.recv_expected_seq[filename]
+                del self.recv_eof_seq[filename]
+                print(f"File {filename} received successfully! Saved to received/{filename}")
+
+    def _handle_ack_packet(self, packet, sender_ip):
+        ack_seq = packet["SEQ"]
+        rwnd = packet["RWND"]
+
+        with self.send_states_lock:
+            if sender_ip not in self.send_states:
+                return
+            state = self.send_states[sender_ip]
+
+        with state["lock"]:
+            state["acked"].add(ack_seq)
+            state["rwnd"] = rwnd
+            if ack_seq in state["send_times"]:
+                del state["send_times"][ack_seq]
 
     def _tcp_listen_loop(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_sock:
@@ -266,7 +366,7 @@ class Chat():
 
     def _render_chat(self):
         print("Chatting with", self.chatting_name)
-        print("Type '\menu' to return to menu or '\quit' to quit.")
+        print("Type '\\menu' to return to menu, '\\quit' to quit, '\\sendfile <path>' to send a file.")
         print()
         if self.ip_chatting is None:
             return
@@ -277,10 +377,81 @@ class Chat():
     def _find_ip(self, users, username):
         return next((ip for ip, user in users.items() if user == username), None)
 
+    def _create_file_packets(self, filepath):
+        filename = os.path.basename(filepath)
+        chunk_size = 1500
+
+        with open(filepath, "rb") as f:
+            data = f.read()
+
+        packets = []
+        seq = 1
+        for i in range(0, len(data), chunk_size):
+            chunk = data[i:i+chunk_size]
+            is_last = (i + chunk_size >= len(data))
+            packet = {
+                "type": "File",
+                "NAME": filename,
+                "SEQ": seq,
+                "EOF": is_last,
+                "BODY": base64.b64encode(chunk).decode("ascii")
+            }
+            packets.append(packet)
+            seq += 1
+        return packets
+
+    def _send_file(self, ip, filepath):
+        packets = self._create_file_packets(filepath)
+        total = len(packets)
+        filename = os.path.basename(filepath)
+
+        # Create per-file send state
+        state = {
+            "acked": set(),
+            "rwnd": 1,
+            "send_times": {},
+            "next_seq": 1,
+            "lock": threading.Lock()
+        }
+
+        with self.send_states_lock:
+            self.send_states[ip] = state
+
+        print(f"Sending {filename} ({total} packets)...")
+
+        while True:
+            with state["lock"]:
+                if len(state["acked"]) >= total:
+                    break
+
+                # Retransmit packets not ACKed within 1 second
+                now = time.time()
+                for seq, sent_time in list(state["send_times"].items()):
+                    if seq not in state["acked"] and now - sent_time > 1.0:
+                        self._send_udp_packet(ip, packets[seq - 1])
+                        state["send_times"][seq] = now
+
+                # Send new packets if window allows
+                in_flight = (state["next_seq"] - 1) - len(state["acked"])
+                while in_flight < state["rwnd"] and state["next_seq"] <= total:
+                    self._send_udp_packet(ip, packets[state["next_seq"] - 1])
+                    state["send_times"][state["next_seq"]] = time.time()
+                    state["next_seq"] += 1
+                    in_flight += 1
+
+            time.sleep(0.01)
+
+        with self.send_states_lock:
+            del self.send_states[ip]
+
+        print(f"File {filename} sent successfully.")
+
+
     def run(self):
         tcp_listen_thread = None
         udp_listen_thread = None
         auto_discover_thread = None
+        file_worker_thread = None
         try:
             self._clear_window()
             self.state = 0
@@ -293,6 +464,9 @@ class Chat():
 
             auto_discover_thread = threading.Thread(target=self._auto_discover_loop, daemon=True)
             auto_discover_thread.start()
+
+            file_worker_thread = threading.Thread(target=self._file_worker_loop, daemon=True)
+            file_worker_thread.start()
 
             while True:
                 if self.state == 0:
@@ -325,6 +499,20 @@ class Chat():
                         break
                     elif cmd == "\menu":
                         self.state = 0
+                    elif cmd.split()[0] == "\sendfile":
+                        parts = cmd.split(maxsplit=1)
+                        if len(parts) < 2:
+                            print("Usage: \sendfile <filepath>")
+                        else:
+                            path = parts[1]
+                            if not os.path.isfile(path):
+                                print(f"File not found: {path}")
+                            else:
+                                threading.Thread(
+                                    target=self._send_file,
+                                    args=(self.ip_chatting, path),
+                                    daemon=True
+                                ).start()
                     else:
                         sent = self._send_packet(self.ip_chatting, self._message_packet(cmd))
                         if sent:
@@ -339,6 +527,8 @@ class Chat():
                 udp_listen_thread.join(timeout=2)
             if auto_discover_thread is not None:
                 auto_discover_thread.join(timeout=2)
+            if file_worker_thread is not None:
+                file_worker_thread.join(timeout=2)
 
 if __name__ == "__main__":
     print("\x1b[2J\x1b[H", end="")
