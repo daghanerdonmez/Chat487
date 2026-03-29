@@ -242,7 +242,7 @@ class Chat():
             self.recv_expected_seq[filename] = 1
             os.makedirs("received", exist_ok=True)
             self.recv_files[filename] = open(os.path.join("received", filename), "wb")
-            print(f"\nReceiving file: {filename}")
+            self._add_info_to_chat(sender_ip, f"Receiving file: {filename}")
 
         # Remember which SEQ is the last one
         if eof:
@@ -278,7 +278,7 @@ class Chat():
                 del self.recv_buffers[filename]
                 del self.recv_expected_seq[filename]
                 del self.recv_eof_seq[filename]
-                print(f"File {filename} received successfully! Saved to received/{filename}")
+                self._add_info_to_chat(sender_ip, f"File {filename} received successfully! Saved to received/{filename}")
 
     def _handle_ack_packet(self, packet, sender_ip):
         ack_seq = packet["SEQ"]
@@ -374,6 +374,13 @@ class Chat():
         for sender_name, message in self.known_users_chats.get(self.ip_chatting, []):
             print(f"{sender_name}: {message}")
 
+    def _add_info_to_chat(self, ip, message):
+        """Add an info message to the chat history with a user and re-render if currently viewing."""
+        self.known_users_chats.setdefault(ip, []).append(("[info]", message))
+        if self.state == 1 and self.ip_chatting == ip:
+            self._clear_window()
+            self._render_chat()
+
     def _find_ip(self, users, username):
         return next((ip for ip, user in users.items() if user == username), None)
 
@@ -417,11 +424,20 @@ class Chat():
         with self.send_states_lock:
             self.send_states[ip] = state
 
-        print(f"Sending {filename} ({total} packets)...")
+        # Add a progress message to chat history and remember its index so we can update it
+        chat_list = self.known_users_chats.setdefault(ip, [])
+        progress_idx = len(chat_list)
+        chat_list.append(("[info]", f"Sending {filename}: 0/{total} packets"))
+        if self.state == 1 and self.ip_chatting == ip:
+            self._clear_window()
+            self._render_chat()
+
+        last_acked_count = 0
 
         while True:
             with state["lock"]:
-                if len(state["acked"]) >= total:
+                acked_count = len(state["acked"])
+                if acked_count >= total:
                     break
 
                 # Retransmit packets not ACKed within 1 second
@@ -432,19 +448,31 @@ class Chat():
                         state["send_times"][seq] = now
 
                 # Send new packets if window allows
-                in_flight = (state["next_seq"] - 1) - len(state["acked"])
+                in_flight = (state["next_seq"] - 1) - acked_count
                 while in_flight < state["rwnd"] and state["next_seq"] <= total:
                     self._send_udp_packet(ip, packets[state["next_seq"] - 1])
                     state["send_times"][state["next_seq"]] = time.time()
                     state["next_seq"] += 1
                     in_flight += 1
 
+            # Update progress message when acked count changes
+            if acked_count != last_acked_count:
+                last_acked_count = acked_count
+                chat_list[progress_idx] = ("[info]", f"Sending {filename}: {acked_count}/{total} packets")
+                if self.state == 1 and self.ip_chatting == ip:
+                    self._clear_window()
+                    self._render_chat()
+
             time.sleep(0.01)
 
         with self.send_states_lock:
             del self.send_states[ip]
 
-        print(f"File {filename} sent successfully.")
+        # Update the progress line to show completion
+        chat_list[progress_idx] = ("[info]", f"Sent {filename}: {total}/{total} packets")
+        if self.state == 1 and self.ip_chatting == ip:
+            self._clear_window()
+            self._render_chat()
 
 
     def run(self):
