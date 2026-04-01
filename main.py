@@ -18,7 +18,7 @@ UDP_PORT = 12487
 
 class Chat():
     def __init__(self, username):
-        self.PORT = TCP_PORT # Change this variable to change the port to be used for communication.
+        self.PORT = TCP_PORT 
         self.UDP_PORT = UDP_PORT
         self.DISCOVER_INTERVAL_SECONDS = 10
 
@@ -49,15 +49,15 @@ class Chat():
 
         # --- File transfer: sender state ---
         # Each active send is tracked by target IP (one file per user at a time)
-        self.send_states = {}       # {ip: {"acked": set, "rwnd": int, "send_times": dict, "next_seq": int}}
+        self.send_states = {} # {ip: {"acked": set, "rwnd": int, "send_times": dict, "next_seq": int}}
         self.send_states_lock = threading.Lock()
 
         # --- File transfer: receiver state ---
-        self.RECV_BUFFER_SIZE = 10  # parameterizable buffer size (in packets)
-        self.recv_buffers = {}      # {filename: {seq: body_bytes}}
+        self.RECV_BUFFER_SIZE = 10 # parameterizable buffer size (in packets)
+        self.recv_buffers = {} # {filename: {seq: body_bytes}}
         self.recv_expected_seq = {} # {filename: next seq to write}
-        self.recv_files = {}        # {filename: open file handle}
-        self.recv_eof_seq = {}      # {filename: seq number of EOF packet}
+        self.recv_files = {} # {filename: open file handle}
+        self.recv_eof_seq = {} # {filename: seq number of EOF packet}
 
         # --- File transfer: incoming packet queue ---
         self.file_queue = queue.Queue()
